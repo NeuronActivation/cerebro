@@ -1,0 +1,8 @@
+services:
+  yliproxy:
+    image: yliproxy:latest
+    environment:
+      RUST_LOG: "info"
+      DISCORD_TOKEN: "<my_discord_token>"
+    restart: unless-stopped
+
