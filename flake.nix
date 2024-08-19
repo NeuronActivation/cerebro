@@ -1,46 +1,82 @@
 {
+  description = "Discord bot that proxies AV1 to Discord supported formats";
+
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs = {
+    self,
     nixpkgs,
-    rust-overlay,
+    crane,
     flake-utils,
     ...
   }:
-    flake-utils.lib.eachDefaultSystem (
-      system: let
-        overlays = [(import rust-overlay)];
-        pkgs = import nixpkgs {
-          inherit system overlays;
-        };
+    flake-utils.lib.eachDefaultSystem (system: let
+      appName = "yliproxy";
+      pkgs = nixpkgs.legacyPackages.${system};
+      craneLib = crane.mkLib pkgs;
+      commonArgs = {
+        src = craneLib.cleanCargoSource ./.;
+        strictDeps = true;
 
-        # Remove when 1.3.0 version lands to nixpkgs-unstable
-        dav1d-dev = pkgs.dav1d.dev.overrideAttrs (oldAttrs: rec {
-          inherit (oldAttrs) pname;
-          version = "1.3.0";
-          src = pkgs.fetchFromGitHub {
-            owner = "videolan";
-            repo = pname;
-            rev = version;
-            hash = "sha256-c7Dur+0HpteI7KkR9oo3WynoH/FCRaBwZA7bJmPDJp8=";
-          };
+        nativeBuildInputs = [
+          pkgs.pkg-config
+        ];
+
+        buildInputs = [
+          pkgs.dav1d
+          pkgs.openssl
+        ];
+      };
+
+      yliproxy = craneLib.buildPackage (commonArgs
+        // {
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
         });
-      in
-        with pkgs; {
-          devShells.default = mkShell {
-            buildInputs = [
-              openssl
-              pkg-config
-              dav1d-dev
-              rust-bin.stable.latest.default
-              rust-analyzer
-              rustfmt
-            ];
-          };
-        }
-    );
+
+      dockerImage = pkgs.dockerTools.buildImage {
+        name = appName;
+        tag = "latest";
+        copyToRoot = pkgs.buildEnv {
+          name = "ffmpeg";
+          paths = [pkgs.ffmpeg-headless];
+          pathsToLink = ["/bin"];
+        };
+        config = {
+          Entrypoint = ["${yliproxy}/bin/${appName}"];
+          Env = ["SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"];
+        };
+      };
+    in {
+      checks = {
+        inherit yliproxy;
+      };
+
+      packages = {
+        default = yliproxy;
+        docker = dockerImage;
+      };
+
+      apps.default = flake-utils.lib.mkApp {
+        drv = yliproxy;
+      };
+
+      devShells.default = craneLib.devShell {
+        checks = self.checks.${system};
+
+        RUST_LOG = "info";
+        packages = with pkgs; [
+          ffmpeg
+          openssl
+        ];
+      };
+    });
 }
