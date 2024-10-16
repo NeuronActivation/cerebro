@@ -1,6 +1,9 @@
+mod web_server;
+
 use async_process::Command;
 use regex::Regex;
 use std::env;
+use std::thread;
 use std::path::{Path, PathBuf};
 
 use serenity::async_trait;
@@ -10,11 +13,14 @@ use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 
 use tracing::{error, info, warn};
-use tracing_subscriber;
 
 use anyhow::Result;
 use lazy_static::lazy_static;
 
+use tokio::runtime::Runtime;
+use tokio::signal;
+use std::sync::Arc;
+use tokio::sync::Notify;
 use tokio::fs::File;
 
 struct Handler;
@@ -25,6 +31,7 @@ lazy_static! {
 }
 
 const DOWNLOAD_DIR: &str = "downloads";
+const CONVERTED_DIR: &str = "converted";
 
 async fn download_file(url: &str) -> Result<PathBuf> {
     let res = reqwest::get(url).await?;
@@ -136,14 +143,25 @@ async fn handle_attachment(ctx: &Context, msg: &Message, attachment: &Attachment
 
 async fn handle_mp4_conversion(ctx: &Context, msg: &Message, url: &str) -> Result<()> {
     let file_path = download_file(url).await?;
-    let output_file = Path::new(DOWNLOAD_DIR).join("converted.mp4");
+
+    // Extract the ID from the Ylilauta URL
+    let id = url.split('/').last().unwrap().split('.').next().unwrap();
+    let file_name = format!("{}.mp4", id);
+    let output_file = Path::new(CONVERTED_DIR).join(&file_name);
+
     let output = Command::new("ffmpeg")
         .args([
-            "-y", // overwrite output file
+            "-y",
             "-i",
             file_path.to_str().unwrap(),
             "-c:v",
             "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-threads",
+            "4",
             "-c:a",
             "copy",
             output_file.to_str().unwrap(),
@@ -153,7 +171,8 @@ async fn handle_mp4_conversion(ctx: &Context, msg: &Message, url: &str) -> Resul
         .expect("failed to execute process");
 
     if output.status.success() {
-        send_file_to_channel(ctx, msg, &output_file).await?;
+        let file_url = format!("http://localhost:8080/files/{}", file_name);
+        msg.channel_id.say(&ctx.http, file_url).await?;
     } else {
         return Err(anyhow::anyhow!(
             "Failed to convert MP4 file: {:?}",
@@ -210,10 +229,12 @@ impl EventHandler for Handler {
     }
 }
 
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    info!("Logging initialized, starting the bot");
+    info!("Logging initialized, starting the bot and file server");
+
     let token = env::var("DISCORD_TOKEN").expect("Discord token not set in the environment");
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES
@@ -223,12 +244,41 @@ async fn main() {
         .await
         .expect("Failed to create download directory");
 
+    tokio::fs::create_dir_all(CONVERTED_DIR)
+        .await
+        .expect("Failed to create converted directory");
+
+    let shutdown = Arc::new(Notify::new());
+    let shutdown_signal = shutdown.clone();
+
+    // Start the file server in a separate task
+    let file_server_handle = tokio::spawn(async move {
+        let converted_dir = std::path::PathBuf::from(CONVERTED_DIR);
+        if let Err(e) = web_server::run_file_server(converted_dir, shutdown_signal).await {
+            error!("File server error: {:?}", e);
+        }
+    });
+
     let mut client = Client::builder(&token, intents)
         .event_handler(Handler)
         .await
-        .expect("Error creating a client");
+        .expect("Error creating client");
+
+    let shard_manager = client.shard_manager.clone();
+
+    tokio::spawn(async move {
+        signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+        info!("Ctrl+C received, shutting down");
+        shard_manager.shutdown_all().await;
+        shutdown.notify_waiters();
+    });
 
     if let Err(why) = client.start().await {
         error!("Client error: {:?}", why);
     }
+
+    // Wait for the file server to finish
+    file_server_handle.await.unwrap();
+
+    info!("Shutdown complete");
 }
