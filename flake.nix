@@ -52,7 +52,11 @@
         };
         config = {
           Entrypoint = ["${yliproxy}/bin/${appName}"];
-          Env = ["SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"];
+          Env = [
+            "DATA_PATH=/data"
+            "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+          ];
+          Volumes = {"/data" = {};};
         };
       };
     in {

@@ -23,13 +23,13 @@ use tokio::{fs::File, signal, sync::Notify};
 struct Handler;
 
 lazy_static! {
+    static ref SERVER_URL: String = env::var("WEBSERVER_URL").expect("WEBSERVER_URL not set");
+    static ref DATA_PATH: String = env::var("DATA_PATH").unwrap_or("./".to_string());
+    static ref DOWNLOAD_DIR: String = format!("{}/downloads", *DATA_PATH);
+    static ref CONVERTED_DIR: String = format!("{}/converted", *DATA_PATH);
     static ref AVIF_PATTERN: Regex = Regex::new(r"https://.+\.ylilauta\.org/.+\.avif").unwrap();
     static ref MP4_PATTERN: Regex = Regex::new(r"https://.+\.ylilauta\.org/.+\.mp4").unwrap();
-    static ref SERVER_URL: String = env::var("WEBSERVER_URL").expect("WEBSERVER_URL not set");
 }
-
-const DOWNLOAD_DIR: &str = "downloads";
-const CONVERTED_DIR: &str = "converted";
 
 async fn download_file(url: &str) -> Result<PathBuf> {
     let res = reqwest::get(url).await?;
@@ -40,7 +40,7 @@ async fn download_file(url: &str) -> Result<PathBuf> {
             .and_then(|s| s.to_str())
             .unwrap_or("downloaded_file");
 
-        let file_path = Path::new(DOWNLOAD_DIR).join(file_name);
+        let file_path = Path::new(&*DOWNLOAD_DIR).join(file_name);
         let mut dest = File::create(&file_path).await?;
 
         let content = res.bytes().await?;
@@ -125,7 +125,7 @@ async fn handle_avif_conversion(ctx: &Context, msg: &Message, url: &str) -> Resu
 
 async fn handle_attachment(ctx: &Context, msg: &Message, attachment: &Attachment) -> Result<()> {
     let content = attachment.download().await?;
-    let file_path = Path::new(DOWNLOAD_DIR).join(&attachment.filename);
+    let file_path = Path::new(&*DOWNLOAD_DIR).join(&attachment.filename);
     let mut file = File::create(&file_path).await?;
 
     tokio::io::copy(&mut content.as_ref(), &mut file).await?;
@@ -145,7 +145,7 @@ async fn handle_mp4_conversion(ctx: &Context, msg: &Message, url: &str) -> Resul
     // Extract the ID from the Ylilauta URL
     let id = url.split('/').last().unwrap().split('.').next().unwrap();
     let file_name = format!("{}.mp4", id);
-    let output_file = Path::new(CONVERTED_DIR).join(&file_name);
+    let output_file = Path::new(&*CONVERTED_DIR).join(&file_name);
 
     let output = Command::new("ffmpeg")
         .args([
@@ -255,14 +255,17 @@ async fn main() {
     info!("Logging initialized, starting the bot and file server");
 
     let token = env::var("DISCORD_TOKEN").expect("Discord token not set in the environment");
+
     let host: IpAddr = env::var("WEBSERVER_HOST")
         .unwrap_or("0.0.0.0".to_string())
         .parse()
         .expect("WEBSERVER_PORT must be a valid u16");
+
     let port: u16 = env::var("WEBSERVER_PORT")
         .unwrap_or("8080".to_string())
         .parse()
         .expect("WEBSERVER_PORT must be a valid u16");
+
     let server_addr: SocketAddr = format!("{}:{}", host, port)
         .parse()
         .expect("Failed to parse host and port into SocketAddr");
@@ -271,11 +274,10 @@ async fn main() {
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT;
 
-    tokio::fs::create_dir_all(DOWNLOAD_DIR)
+    tokio::fs::create_dir_all(&*DOWNLOAD_DIR)
         .await
         .expect("Failed to create download directory");
-
-    tokio::fs::create_dir_all(CONVERTED_DIR)
+    tokio::fs::create_dir_all(&*CONVERTED_DIR)
         .await
         .expect("Failed to create converted directory");
 
@@ -284,7 +286,7 @@ async fn main() {
 
     // Start the file server in a separate task
     let file_server_handle = tokio::spawn(async move {
-        let converted_dir = std::path::PathBuf::from(CONVERTED_DIR);
+        let converted_dir = PathBuf::from(&*CONVERTED_DIR);
         if let Err(e) =
             web_server::run_file_server(server_addr, converted_dir, shutdown_signal).await
         {
