@@ -193,9 +193,17 @@ impl EventHandler for Handler {
         if let Some(captures) = AVIF_PATTERN.captures(&msg.content) {
             info!("Ylilauta AVIF conversion");
             if let Some(url) = captures.get(0) {
+                let process_reaction = msg.react(&ctx.http, '⏳').await.unwrap();
+
                 if let Err(e) = handle_avif_conversion(&ctx, &msg, url.as_str()).await {
                     error!("Error handling AVIF conversion: {:?}", e);
+                    msg.react(&ctx.http, '❌').await.ok();
                 }
+
+                if let Err(e) = process_reaction.delete(&ctx.http).await {
+                    error!("Error removing reactions: {:?}", e);
+                }
+                return;
             }
         }
 
@@ -204,9 +212,16 @@ impl EventHandler for Handler {
             if let Some(captures) = MP4_PATTERN.captures(&msg.content) {
                 info!("No embeds found in the message. Downloading");
                 if let Some(url) = captures.get(0) {
+                    let process_reaction = msg.react(&ctx.http, '⏳').await.unwrap();
+
                     if let Err(e) = handle_mp4_conversion(&ctx, &msg, url.as_str()).await {
                         error!("Error handling MP4 conversion: {:?}", e);
+                        msg.react(&ctx.http, '❌').await.ok();
                     }
+                    if let Err(e) = process_reaction.delete(&ctx.http).await {
+                        error!("Error removing reactions: {:?}", e);
+                    }
+                    return;
                 }
             }
         }
@@ -215,9 +230,16 @@ impl EventHandler for Handler {
         for attachment in &msg.attachments {
             if attachment.filename.ends_with(".avif") {
                 info!("Attachment: {}, starting conversion", attachment.filename);
+                let process_reaction = msg.react(&ctx.http, '⏳').await.unwrap();
+
                 if let Err(e) = handle_attachment(&ctx, &msg, attachment).await {
                     error!("Error handling AVIF attachment: {:?}", e);
+                    msg.react(&ctx.http, '❌').await.ok();
                 }
+                if let Err(e) = process_reaction.delete(&ctx.http).await {
+                    error!("Error removing reactions: {:?}", e);
+                }
+                return;
             }
         }
     }
