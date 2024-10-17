@@ -1,5 +1,5 @@
 /target
 result
-/downloads
-/converted
+**/downloads
+**/converted
 compose.yml

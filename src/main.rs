@@ -1,10 +1,9 @@
 mod web_server;
 
-use async_process::Command;
-use regex::Regex;
 use std::env;
-use std::thread;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serenity::async_trait;
 use serenity::builder::{CreateAttachment, CreateMessage};
@@ -15,19 +14,18 @@ use serenity::prelude::*;
 use tracing::{error, info, warn};
 
 use anyhow::Result;
+use async_process::Command;
 use lazy_static::lazy_static;
+use regex::Regex;
 
-use tokio::runtime::Runtime;
-use tokio::signal;
-use std::sync::Arc;
-use tokio::sync::Notify;
-use tokio::fs::File;
+use tokio::{fs::File, signal, sync::Notify};
 
 struct Handler;
 
 lazy_static! {
     static ref AVIF_PATTERN: Regex = Regex::new(r"https://.+\.ylilauta\.org/.+\.avif").unwrap();
     static ref MP4_PATTERN: Regex = Regex::new(r"https://.+\.ylilauta\.org/.+\.mp4").unwrap();
+    static ref SERVER_URL: String = env::var("WEBSERVER_URL").expect("WEBSERVER_URL not set");
 }
 
 const DOWNLOAD_DIR: &str = "downloads";
@@ -61,7 +59,7 @@ async fn download_file(url: &str) -> Result<PathBuf> {
 }
 
 async fn convert_avif_to_png(file_path: &Path) -> Result<PathBuf> {
-    let avif_img = match image::open(&file_path) {
+    let avif_img = match image::open(file_path) {
         Ok(img) => img,
         Err(e) => {
             tokio::fs::remove_file(&file_path).await?;
@@ -171,7 +169,7 @@ async fn handle_mp4_conversion(ctx: &Context, msg: &Message, url: &str) -> Resul
         .expect("failed to execute process");
 
     if output.status.success() {
-        let file_url = format!("http://localhost:8080/files/{}", file_name);
+        let file_url = format!("{}/{}", *SERVER_URL, file_name);
         msg.channel_id.say(&ctx.http, file_url).await?;
     } else {
         return Err(anyhow::anyhow!(
@@ -229,13 +227,24 @@ impl EventHandler for Handler {
     }
 }
 
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
     info!("Logging initialized, starting the bot and file server");
 
     let token = env::var("DISCORD_TOKEN").expect("Discord token not set in the environment");
+    let host: IpAddr = env::var("WEBSERVER_HOST")
+        .unwrap_or("0.0.0.0".to_string())
+        .parse()
+        .expect("WEBSERVER_PORT must be a valid u16");
+    let port: u16 = env::var("WEBSERVER_PORT")
+        .unwrap_or("8080".to_string())
+        .parse()
+        .expect("WEBSERVER_PORT must be a valid u16");
+    let server_addr: SocketAddr = format!("{}:{}", host, port)
+        .parse()
+        .expect("Failed to parse host and port into SocketAddr");
+
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT;
@@ -254,7 +263,9 @@ async fn main() {
     // Start the file server in a separate task
     let file_server_handle = tokio::spawn(async move {
         let converted_dir = std::path::PathBuf::from(CONVERTED_DIR);
-        if let Err(e) = web_server::run_file_server(converted_dir, shutdown_signal).await {
+        if let Err(e) =
+            web_server::run_file_server(server_addr, converted_dir, shutdown_signal).await
+        {
             error!("File server error: {:?}", e);
         }
     });
@@ -265,11 +276,10 @@ async fn main() {
         .expect("Error creating client");
 
     let shard_manager = client.shard_manager.clone();
-
     tokio::spawn(async move {
         signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-        info!("Ctrl+C received, shutting down");
         shard_manager.shutdown_all().await;
+        info!("Ctrl+C received, shutting down");
         shutdown.notify_waiters();
     });
 

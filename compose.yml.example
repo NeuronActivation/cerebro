@@ -4,5 +4,9 @@ services:
     environment:
       RUST_LOG: "info"
       DISCORD_TOKEN: "<my_discord_token>"
+      WEBSERVER_URL: "https://example.com"
+      WEBSERVER_HOST: "127.0.0.0"
+      WEBSERVER_PORT: 8080
+
     restart: unless-stopped
 

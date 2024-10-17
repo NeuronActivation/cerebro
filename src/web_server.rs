@@ -1,27 +1,24 @@
-use actix_web::{App, HttpServer};
 use actix_files::Files;
-use std::path::PathBuf;
-use tokio::sync::Notify;
+use actix_web::{App, HttpServer};
 use std::sync::Arc;
+use std::{net::SocketAddr, path::PathBuf};
+use tokio::sync::Notify;
+use tracing::info;
 
-pub async fn run_file_server(converted_dir: PathBuf, shutdown_signal: Arc<Notify>) -> std::io::Result<()> {
+pub async fn run_file_server(
+    addr: SocketAddr,
+    converted_dir: PathBuf,
+    shutdown_signal: Arc<Notify>,
+) -> std::io::Result<()> {
     let server = HttpServer::new(move || {
-        App::new()
-            .service(Files::new("/files", converted_dir.clone()).show_files_listing())
+        App::new().service(Files::new("/", converted_dir.clone()).show_files_listing())
     })
-    .bind("0.0.0.0:8089")?;
+    .bind(addr)?;
 
-    let server_handle = server.run();
+    info!("Starting file server on: {addr}");
 
-    tokio::select! {
-        _ = server_handle => {},
-        _ = shutdown_signal.notified() => {
-            // Graceful shutdown
-            tracing::info!("Shutting down file server");
-        }
-    }
+    server.run().await?;
+    shutdown_signal.notified();
 
     Ok(())
 }
-
-
