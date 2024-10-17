@@ -10,10 +10,9 @@ pub async fn run_file_server(
     converted_dir: PathBuf,
     shutdown_signal: Arc<Notify>,
 ) -> std::io::Result<()> {
-    let server = HttpServer::new(move || {
-        App::new().service(Files::new("/", converted_dir.clone()).show_files_listing())
-    })
-    .bind(addr)?;
+    let server =
+        HttpServer::new(move || App::new().service(Files::new("/", converted_dir.clone())))
+            .bind(addr)?;
 
     info!("Starting file server on: {addr}");
 
