@@ -6,12 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serenity::async_trait;
-use serenity::builder::{CreateAttachment, CreateMessage};
-use serenity::model::channel::{Attachment, Message};
+use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use anyhow::Result;
 use async_process::Command;
@@ -27,7 +26,6 @@ lazy_static! {
     static ref DATA_PATH: String = env::var("DATA_PATH").unwrap_or("./".to_string());
     static ref DOWNLOAD_DIR: String = format!("{}/downloads", *DATA_PATH);
     static ref CONVERTED_DIR: String = format!("{}/converted", *DATA_PATH);
-    static ref AVIF_PATTERN: Regex = Regex::new(r"https://.+\.ylilauta\.org/.+\.avif").unwrap();
     static ref MP4_PATTERN: Regex = Regex::new(r"https://.+\.ylilauta\.org/.+\.mp4").unwrap();
 }
 
@@ -56,87 +54,6 @@ async fn download_file(url: &str) -> Result<PathBuf> {
             res.status()
         ))
     }
-}
-
-async fn convert_avif_to_png(file_path: &Path) -> Result<PathBuf> {
-    let avif_img = match image::open(file_path) {
-        Ok(img) => img,
-        Err(e) => {
-            tokio::fs::remove_file(&file_path).await?;
-            return Err(anyhow::anyhow!("Failed to open AVIF image: {:?}", e));
-        }
-    };
-
-    // Change the file extension to .png
-    let converted_png_path = file_path.with_extension("png");
-
-    if let Err(e) = avif_img.save_with_format(&converted_png_path, image::ImageFormat::Png) {
-        return Err(anyhow::anyhow!("Failed to save PNG image: {:?}", e));
-    }
-
-    // clean up original file
-    if let Err(e) = tokio::fs::remove_file(&file_path).await {
-        error!("Failed to remove file '{}': {:?}", file_path.display(), e);
-    }
-
-    Ok(converted_png_path)
-}
-
-async fn send_file_to_channel(ctx: &Context, msg: &Message, file_path: &Path) -> Result<()> {
-    let attachments = match CreateAttachment::path(&file_path).await {
-        Ok(attachment) => vec![attachment],
-        Err(e) => {
-            error!("Failed to create attachment: {:?}", e);
-            return Err(anyhow::anyhow!("Failed to create attachment: {:?}", e));
-        }
-    };
-
-    if let Err(e) = msg
-        .channel_id
-        .send_files(&ctx.http, attachments, CreateMessage::new())
-        .await
-    {
-        error!("Failed to send files: {:?}", e);
-        return Err(anyhow::anyhow!("Failed to send files: {:?}", e));
-    }
-
-    info!("File '{}' sent to the channel", file_path.display());
-
-    // clean up sent file
-    if let Err(e) = tokio::fs::remove_file(&file_path).await {
-        warn!("Failed to remove file '{}': {:?}", file_path.display(), e);
-    }
-
-    Ok(())
-}
-
-async fn handle_avif_conversion(ctx: &Context, msg: &Message, url: &str) -> Result<()> {
-    let file_path = match download_file(url).await {
-        Ok(path) => path,
-        Err(e) => {
-            error!("Failed to download file: {:?}", e);
-            return Err(e);
-        }
-    };
-
-    let converted_png_path = convert_avif_to_png(&file_path).await?;
-    send_file_to_channel(ctx, msg, &converted_png_path).await
-}
-
-async fn handle_attachment(ctx: &Context, msg: &Message, attachment: &Attachment) -> Result<()> {
-    let content = attachment.download().await?;
-    let file_path = Path::new(&*DOWNLOAD_DIR).join(&attachment.filename);
-    let mut file = File::create(&file_path).await?;
-
-    tokio::io::copy(&mut content.as_ref(), &mut file).await?;
-
-    // Check if the file is an AVIF image properly (not just by extension)
-    if image::guess_format(&content).unwrap() == image::ImageFormat::Avif {
-        let png_file_path = convert_avif_to_png(&file_path).await?;
-        send_file_to_channel(ctx, msg, &png_file_path).await?;
-    }
-
-    Ok(())
 }
 
 async fn handle_mp4_conversion(ctx: &Context, msg: &Message, url: &str) -> Result<()> {
@@ -189,24 +106,6 @@ impl EventHandler for Handler {
             return;
         }
 
-        // Handle AVIF images from Ylilauta.org
-        if let Some(captures) = AVIF_PATTERN.captures(&msg.content) {
-            info!("Ylilauta AVIF conversion");
-            if let Some(url) = captures.get(0) {
-                let process_reaction = msg.react(&ctx.http, '⏳').await.unwrap();
-
-                if let Err(e) = handle_avif_conversion(&ctx, &msg, url.as_str()).await {
-                    error!("Error handling AVIF conversion: {:?}", e);
-                    msg.react(&ctx.http, '❌').await.ok();
-                }
-
-                if let Err(e) = process_reaction.delete(&ctx.http).await {
-                    error!("Error removing reactions: {:?}", e);
-                }
-                return;
-            }
-        }
-
         // Handle MP4 files if no embeds are found
         if msg.embeds.is_empty() {
             if let Some(captures) = MP4_PATTERN.captures(&msg.content) {
@@ -223,23 +122,6 @@ impl EventHandler for Handler {
                     }
                     return;
                 }
-            }
-        }
-
-        // Handle attachments
-        for attachment in &msg.attachments {
-            if attachment.filename.ends_with(".avif") {
-                info!("Attachment: {}, starting conversion", attachment.filename);
-                let process_reaction = msg.react(&ctx.http, '⏳').await.unwrap();
-
-                if let Err(e) = handle_attachment(&ctx, &msg, attachment).await {
-                    error!("Error handling AVIF attachment: {:?}", e);
-                    msg.react(&ctx.http, '❌').await.ok();
-                }
-                if let Err(e) = process_reaction.delete(&ctx.http).await {
-                    error!("Error removing reactions: {:?}", e);
-                }
-                return;
             }
         }
     }
