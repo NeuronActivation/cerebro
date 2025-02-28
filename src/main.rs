@@ -1,200 +1,51 @@
-mod web_server;
+mod bot;
+mod config;
+mod services;
+mod web;
 
-use std::env;
-use std::net::{IpAddr, SocketAddr};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-use serenity::async_trait;
-use serenity::model::channel::Message;
-use serenity::model::gateway::Ready;
-use serenity::prelude::*;
-
+use tokio::sync::Notify;
 use tracing::{error, info};
 
-use anyhow::Result;
-use async_process::Command;
-use lazy_static::lazy_static;
-use regex::Regex;
-
-use tokio::{fs::File, signal, sync::Notify};
-
-struct Handler;
-
-lazy_static! {
-    static ref SERVER_URL: String = env::var("WEBSERVER_URL").expect("WEBSERVER_URL not set");
-    static ref DATA_PATH: String = env::var("DATA_PATH").unwrap_or("./".to_string());
-    static ref DOWNLOAD_DIR: String = format!("{}/downloads", *DATA_PATH);
-    static ref CONVERTED_DIR: String = format!("{}/converted", *DATA_PATH);
-    static ref MP4_PATTERN: Regex = Regex::new(r"https://.+\.ylilauta\.org/.+\.mp4").unwrap();
-}
-
-async fn download_file(url: &str) -> Result<PathBuf> {
-    let res = reqwest::get(url).await?;
-
-    if res.status().is_success() {
-        let file_name = Path::new(url)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("downloaded_file");
-
-        let file_path = Path::new(&*DOWNLOAD_DIR).join(file_name);
-        let mut dest = File::create(&file_path).await?;
-
-        let content = res.bytes().await?;
-        tokio::io::copy(&mut content.as_ref(), &mut dest).await?;
-        info!(
-            "File '{}' downloaded and saved successfully.",
-            file_path.display()
-        );
-        Ok(file_path)
-    } else {
-        Err(anyhow::anyhow!(
-            "Download failed with status: {}",
-            res.status()
-        ))
-    }
-}
-
-async fn handle_mp4_conversion(ctx: &Context, msg: &Message, url: &str) -> Result<()> {
-    let file_path = download_file(url).await?;
-
-    // Extract the ID from the Ylilauta URL
-    let id = url.split('/').last().unwrap().split('.').next().unwrap();
-    let file_name = format!("{}.mp4", id);
-    let output_file = Path::new(&*CONVERTED_DIR).join(&file_name);
-
-    let output = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-i",
-            file_path.to_str().unwrap(),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "23",
-            "-threads",
-            "4",
-            "-c:a",
-            "copy",
-            output_file.to_str().unwrap(),
-        ])
-        .output()
-        .await
-        .expect("failed to execute process");
-
-    if output.status.success() {
-        let file_url = format!("{}/{}", *SERVER_URL, file_name);
-        msg.channel_id.say(&ctx.http, file_url).await?;
-    } else {
-        return Err(anyhow::anyhow!(
-            "Failed to convert MP4 file: {:?}",
-            output.stderr
-        ));
-    }
-
-    Ok(())
-}
-
-#[async_trait]
-impl EventHandler for Handler {
-    async fn message(&self, ctx: Context, msg: Message) {
-        // Ignore messages from self and other bots
-        if msg.author.bot {
-            return;
-        }
-
-        // Handle MP4 files if no embeds are found
-        if msg.embeds.is_empty() {
-            if let Some(captures) = MP4_PATTERN.captures(&msg.content) {
-                info!("No embeds found in the message. Downloading");
-                if let Some(url) = captures.get(0) {
-                    let process_reaction = msg.react(&ctx.http, '⏳').await.unwrap();
-
-                    if let Err(e) = handle_mp4_conversion(&ctx, &msg, url.as_str()).await {
-                        error!("Error handling MP4 conversion: {:?}", e);
-                        msg.react(&ctx.http, '❌').await.ok();
-                    }
-                    if let Err(e) = process_reaction.delete(&ctx.http).await {
-                        error!("Error removing reactions: {:?}", e);
-                    }
-                    return;
-                }
-            }
-        }
-    }
-
-    async fn ready(&self, _: Context, ready: Ready) {
-        info!("{} is connected!", ready.user.name);
-    }
-}
+use crate::bot::client::start_bot;
+use crate::config::settings::CONFIG;
+use crate::web::server::run_file_server;
 
 #[tokio::main]
 async fn main() {
+    // Initialize logging
     tracing_subscriber::fmt::init();
-    info!("Logging initialized, starting the bot and file server");
+    info!("Logging initialized, starting the application");
 
-    let token = env::var("DISCORD_TOKEN").expect("Discord token not set in the environment");
-
-    let host: IpAddr = env::var("WEBSERVER_HOST")
-        .unwrap_or("0.0.0.0".to_string())
-        .parse()
-        .expect("WEBSERVER_PORT must be a valid u16");
-
-    let port: u16 = env::var("WEBSERVER_PORT")
-        .unwrap_or("8080".to_string())
-        .parse()
-        .expect("WEBSERVER_PORT must be a valid u16");
-
-    let server_addr: SocketAddr = format!("{}:{}", host, port)
-        .parse()
-        .expect("Failed to parse host and port into SocketAddr");
-
-    let intents = GatewayIntents::GUILD_MESSAGES
-        | GatewayIntents::DIRECT_MESSAGES
-        | GatewayIntents::MESSAGE_CONTENT;
-
-    tokio::fs::create_dir_all(&*DOWNLOAD_DIR)
+    // Create required directories
+    tokio::fs::create_dir_all(&CONFIG.download_dir)
         .await
         .expect("Failed to create download directory");
-    tokio::fs::create_dir_all(&*CONVERTED_DIR)
+    tokio::fs::create_dir_all(&CONFIG.converted_dir)
         .await
         .expect("Failed to create converted directory");
 
+    // Create shutdown signal
     let shutdown = Arc::new(Notify::new());
-    let shutdown_signal = shutdown.clone();
 
-    // Start the file server in a separate task
-    let file_server_handle = tokio::spawn(async move {
-        let converted_dir = PathBuf::from(&*CONVERTED_DIR);
-        if let Err(e) =
-            web_server::run_file_server(server_addr, converted_dir, shutdown_signal).await
-        {
+    // Start web server
+    let web_shutdown = shutdown.clone();
+    let web_server_handle = tokio::spawn(async move {
+        if let Err(e) = run_file_server(web_shutdown).await {
             error!("File server error: {:?}", e);
         }
     });
 
-    let mut client = Client::builder(&token, intents)
-        .event_handler(Handler)
-        .await
-        .expect("Error creating client");
-
-    let shard_manager = client.shard_manager.clone();
-    tokio::spawn(async move {
-        signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-        shard_manager.shutdown_all().await;
-        info!("Ctrl+C received, shutting down");
-        shutdown.notify_waiters();
+    // Start Discord bot
+    let bot_shutdown = shutdown.clone();
+    let bot_handle = tokio::spawn(async move {
+        if let Err(e) = start_bot(bot_shutdown).await {
+            error!("Bot error: {:?}", e);
+        }
     });
 
-    if let Err(why) = client.start().await {
-        error!("Client error: {:?}", why);
-    }
-
-    // Wait for the file server to finish
-    file_server_handle.await.unwrap();
+    // Wait for both tasks to complete
+    let _ = tokio::join!(web_server_handle, bot_handle);
 
     info!("Shutdown complete");
 }
