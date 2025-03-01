@@ -7,7 +7,7 @@ use tokio::sync::Notify;
 use tracing::{error, info};
 
 use crate::bot::client::start_bot;
-use crate::config::settings::CONFIG;
+use crate::config::CONFIG;
 use crate::web::server::run_file_server;
 
 #[tokio::main]

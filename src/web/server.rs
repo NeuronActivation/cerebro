@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 use tracing::info;
 
-use crate::config::settings::CONFIG;
+use crate::config::CONFIG;
 
 pub async fn run_file_server(shutdown_signal: Arc<Notify>) -> std::io::Result<()> {
     let addr = format!("{}:{}", CONFIG.host, CONFIG.port)

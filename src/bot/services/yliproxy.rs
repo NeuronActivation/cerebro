@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs::File;
 use tracing::info;
 
-use crate::config::settings::CONFIG;
+use crate::config::CONFIG;
 
 pub struct YliProxy;
 

@@ -4,7 +4,7 @@ use tokio::sync::Notify;
 use tracing::info;
 
 use crate::bot::handler::Handler;
-use crate::config::settings::CONFIG;
+use crate::config::CONFIG;
 
 pub async fn start_bot(shutdown_signal: Arc<Notify>) -> Result<(), Box<dyn std::error::Error>> {
     let intents = GatewayIntents::GUILD_MESSAGES
