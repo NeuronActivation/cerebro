@@ -11,9 +11,9 @@ lazy_static! {
     static ref MP4_PATTERN: Regex = Regex::new(r"https://.+\.ylilauta\.org/.+\.mp4").unwrap();
 }
 
-pub struct ConvertCommand;
+pub struct YliProxyHandler;
 
-impl ConvertCommand {
+impl YliProxyHandler {
     pub async fn handle(ctx: &Context, msg: &Message) -> bool {
         // Check if message contains a Ylilauta video URL
         if let Some(captures) = MP4_PATTERN.captures(&msg.content) {

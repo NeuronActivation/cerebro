@@ -4,7 +4,7 @@ use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 use tracing::info;
 
-use crate::bot::commands::convert::ConvertCommand;
+use crate::bot::commands::YliProxyHandler;
 
 pub struct Handler;
 
@@ -12,14 +12,8 @@ pub struct Handler;
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
         // Ignore messages from self and other bots
-        if msg.author.bot {
-            return;
-        }
-
-        // Check for embeds
-        if msg.embeds.is_empty() {
-            // Try to handle with the convert command
-            ConvertCommand::handle(&ctx, &msg).await;
+        if !msg.author.bot {
+            YliProxyHandler::handle(&ctx, &msg).await;
         }
     }
 
