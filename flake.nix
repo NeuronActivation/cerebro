@@ -1,15 +1,12 @@
 {
-  description = "Discord bot that proxies AV1 to Discord supported formats";
-
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
 
     crane = {
       url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs = {
@@ -20,7 +17,7 @@
     ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
-      appName = "yliproxy";
+      appName = "cerebro";
       pkgs = nixpkgs.legacyPackages.${system};
       craneLib = crane.mkLib pkgs;
       commonArgs = {
@@ -37,7 +34,7 @@
         ];
       };
 
-      yliproxy = craneLib.buildPackage (commonArgs
+      cerebro = craneLib.buildPackage (commonArgs
         // {
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
         });
@@ -51,7 +48,7 @@
           pathsToLink = ["/bin"];
         };
         config = {
-          Entrypoint = ["${yliproxy}/bin/${appName}"];
+          Entrypoint = ["${cerebro}/bin/${appName}"];
           Env = [
             "DATA_PATH=/data"
             "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
@@ -61,16 +58,16 @@
       };
     in {
       checks = {
-        inherit yliproxy;
+        inherit cerebro;
       };
 
       packages = {
-        default = yliproxy;
+        default = cerebro;
         docker = dockerImage;
       };
 
       apps.default = flake-utils.lib.mkApp {
-        drv = yliproxy;
+        drv = cerebro;
       };
 
       devShells.default = craneLib.devShell {
