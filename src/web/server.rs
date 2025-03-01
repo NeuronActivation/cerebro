@@ -1,6 +1,7 @@
 use actix_files::Files;
 use actix_web::{App, HttpServer};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tracing::info;
@@ -8,15 +9,15 @@ use tracing::info;
 use crate::config::settings::CONFIG;
 
 pub async fn run_file_server(shutdown_signal: Arc<Notify>) -> std::io::Result<()> {
-    let addr = format!("{}:{}", CONFIG.webserver_host, CONFIG.webserver_port)
+    let addr = format!("{}:{}", CONFIG.host, CONFIG.port)
         .parse::<SocketAddr>()
         .expect("Failed to parse host and port into SocketAddr");
 
-    let converted_dir = CONFIG.converted_path();
-
-    let server =
-        HttpServer::new(move || App::new().service(Files::new("/", converted_dir.clone())))
-            .bind(addr)?;
+    let server = HttpServer::new(move || {
+        let path = PathBuf::from(&CONFIG.converted_dir);
+        App::new().service(Files::new("/", path))
+    })
+    .bind(addr)?;
 
     info!("Starting file server on: {addr}");
 
