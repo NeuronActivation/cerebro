@@ -5,7 +5,7 @@ use serenity::model::channel::Message;
 use serenity::prelude::*;
 use tracing::{error, info};
 
-use crate::services::yliproxy::YliProxy;
+use crate::bot::services::yliproxy::YliProxy;
 
 lazy_static! {
     static ref MP4_PATTERN: Regex = Regex::new(r"https://.+\.ylilauta\.org/.+\.mp4").unwrap();

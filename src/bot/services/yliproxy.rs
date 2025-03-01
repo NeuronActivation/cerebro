@@ -70,7 +70,7 @@ impl YliProxy {
     }
 
     pub fn get_file_url(file_name: &str) -> String {
-        format!("{}/{}", CONFIG.server_url, file_name)
+        format!("{}/{}", CONFIG.public_url, file_name)
     }
 
     pub fn extract_id_from_url(url: &str) -> &str {

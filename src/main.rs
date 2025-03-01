@@ -1,6 +1,5 @@
 mod bot;
 mod config;
-mod services;
 mod web;
 
 use std::sync::Arc;
