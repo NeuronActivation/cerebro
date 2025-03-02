@@ -38,15 +38,27 @@ impl YliProxyHandler {
     }
 
     async fn process_video(ctx: &Context, msg: &Message, url: &str) -> Result<()> {
-        // Download the video
+        let id = match YliProxy::extract_id_from_url(url) {
+            Ok(id) => id,
+            Err(e) => return Err(e),
+        };
+
+        // Check if file already exists
+        if let Some(file_url) = YliProxy::get_existing_file_url(&id).await {
+            info!("Using existing converted file for ID: {}", id);
+            msg.channel_id.say(&ctx.http, file_url).await?;
+            return Ok(());
+        }
+
+        // Process new file
         let file_path = YliProxy::download_file(url).await?;
+        let output_file = YliProxy::convert_to_h264(&file_path, &id).await?;
 
-        // Extract ID and convert video
-        let id = YliProxy::extract_id_from_url(url);
-        let output_file = YliProxy::convert_to_h264(&file_path, id).await?;
+        let file_name = output_file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow::anyhow!("Invalid output filename"))?;
 
-        // Get the file URL and send it
-        let file_name = output_file.file_name().unwrap().to_str().unwrap();
         let file_url = YliProxy::get_file_url(file_name);
         msg.channel_id.say(&ctx.http, file_url).await?;
 

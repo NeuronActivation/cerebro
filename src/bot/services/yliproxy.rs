@@ -1,10 +1,16 @@
 use anyhow::Result;
 use async_process::Command;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::path::{Path, PathBuf};
-use tokio::fs::File;
+use tokio::fs;
 use tracing::info;
 
 use crate::config::CONFIG;
+
+lazy_static! {
+    static ref ID_PATTERN: Regex = Regex::new(r"/([^/]+)\.mp4$").unwrap();
+}
 
 pub struct YliProxy;
 
@@ -52,7 +58,7 @@ impl YliProxy {
                 .unwrap_or("downloaded_file");
 
             let file_path = Path::new(&CONFIG.download_dir).join(file_name);
-            let mut dest = File::create(&file_path).await?;
+            let mut dest = fs::File::create(&file_path).await?;
 
             let content = res.bytes().await?;
             tokio::io::copy(&mut content.as_ref(), &mut dest).await?;
@@ -69,11 +75,26 @@ impl YliProxy {
         }
     }
 
-    pub fn get_file_url(file_name: &str) -> String {
-        format!("{}/{}", CONFIG.public_url, file_name)
+    pub fn extract_id_from_url(url: &str) -> Result<String> {
+        ID_PATTERN
+            .captures(url)
+            .and_then(|cap| cap.get(1))
+            .map(|m| m.as_str().to_string())
+            .ok_or_else(|| anyhow::anyhow!("Failed to extract ID from URL: {}", url))
     }
 
-    pub fn extract_id_from_url(url: &str) -> &str {
-        url.split('/').last().unwrap().split('.').next().unwrap()
+    pub async fn get_existing_file_url(id: &str) -> Option<String> {
+        let file_name = format!("{}.mp4", id);
+        let output_path = Path::new(&CONFIG.converted_dir).join(&file_name);
+
+        if fs::metadata(&output_path).await.is_ok() {
+            Some(Self::get_file_url(&file_name))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_file_url(file_name: &str) -> String {
+        format!("{}/{}", CONFIG.public_url, file_name)
     }
 }
