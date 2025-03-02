@@ -4,7 +4,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::config::CONFIG;
 
@@ -38,6 +38,11 @@ impl YliProxy {
             ])
             .output()
             .await?;
+
+        // Cleanup the downloaded file
+        if let Err(e) = fs::remove_file(input_path).await {
+            error!("Failed to remove temp file {}: {}", input_path.display(), e);
+        }
 
         if output.status.success() {
             info!("Successfully converted video to H264: {}", file_name);
