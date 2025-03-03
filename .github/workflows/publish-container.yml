@@ -1,0 +1,55 @@
+name: Build and Publish Container
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build container with Nix
+        run: |
+          nix build .#docker
+
+      - name: Load image into Docker
+        run: |
+          docker load < result
+
+      - name: Tag and push image
+        run: |
+          # Get the image ID from the loaded image
+          IMAGE_ID=$(docker images -q | head -n 1)
+
+          # Tag with GitHub repository name
+          REPO_NAME="${{ github.repository }}"
+          REPO_NAME=${REPO_NAME,,}
+
+          # Tag the image
+          docker tag $IMAGE_ID ghcr.io/$REPO_NAME:${{ github.sha }}
+          docker tag $IMAGE_ID ghcr.io/$REPO_NAME:latest
+
+          # Push images
+          docker push ghcr.io/$REPO_NAME:${{ github.sha }}
+          docker push ghcr.io/$REPO_NAME:latest
+
