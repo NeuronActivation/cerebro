@@ -39,7 +39,7 @@
         tag = "latest";
         copyToRoot = pkgs.buildEnv {
           name = "ffmpeg";
-          paths = [pkgs.ffmpeg-headless];
+          paths = [pkgs.ffmpeg-full pkgs.libva-utils];
           pathsToLink = ["/bin"];
         };
         config = {
