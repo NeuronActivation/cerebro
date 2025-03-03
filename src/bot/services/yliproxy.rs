@@ -18,24 +18,14 @@ impl YliProxy {
     pub async fn convert_to_h264(input_path: &Path, id: &str) -> Result<PathBuf> {
         let file_name = format!("{}.mp4", id);
         let output_file = Path::new(&CONFIG.converted_dir).join(&file_name);
+        let ffmpeg_args = CONFIG
+            .ffmpeg_args
+            .replace("$INPUT", input_path.to_str().unwrap())
+            .replace("$OUTPUT", output_file.to_str().unwrap());
+        let ffmpeg_args: Vec<&str> = ffmpeg_args.split_whitespace().collect();
 
-        let output = Command::new("ffmpeg")
-            .args([
-                "-y",
-                "-i",
-                input_path.to_str().unwrap(),
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "23",
-                "-threads",
-                "4",
-                "-c:a",
-                "copy",
-                output_file.to_str().unwrap(),
-            ])
+        let output = Command::new(&CONFIG.ffmpeg_bin)
+            .args(ffmpeg_args)
             .output()
             .await?;
 
