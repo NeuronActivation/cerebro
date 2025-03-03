@@ -39,7 +39,12 @@
         tag = "latest";
         copyToRoot = pkgs.buildEnv {
           name = "ffmpeg";
-          paths = [pkgs.ffmpeg-full pkgs.libva-utils];
+          paths = [
+            pkgs.ffmpeg-full
+            pkgs.libva-utils
+            pkgs.intel-media-driver
+            pkgs.intel-vaapi-driver
+          ];
           pathsToLink = ["/bin"];
         };
         config = {
