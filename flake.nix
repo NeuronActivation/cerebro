@@ -28,7 +28,6 @@
       commonArgs = {
         src = craneLib.cleanCargoSource ./.;
         strictDeps = true;
-
         nativeBuildInputs = [
           pkgs.pkg-config
         ];
@@ -49,10 +48,8 @@
         copyToRoot = pkgs.buildEnv {
           name = "ffmpeg";
           paths = [
-            pkgs.ffmpeg-full
+            (pkgs.ffmpeg-headless.override {withVpl = true;})
             pkgs.libva-utils
-            pkgs.intel-media-driver
-            pkgs.intel-vaapi-driver
           ];
           pathsToLink = ["/bin"];
         };
