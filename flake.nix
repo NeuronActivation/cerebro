@@ -3,6 +3,11 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     crane .url = "github:ipetkov/crane";
+
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
@@ -10,12 +15,16 @@
     nixpkgs,
     crane,
     flake-utils,
+    rust-overlay,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
       appName = "cerebro";
-      pkgs = nixpkgs.legacyPackages.${system};
-      craneLib = crane.mkLib pkgs;
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [(import rust-overlay)];
+      };
+      craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.nightly.latest.default);
       commonArgs = {
         src = craneLib.cleanCargoSource ./.;
         strictDeps = true;
@@ -52,6 +61,9 @@
           Env = [
             "DATA_PATH=/data"
             "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+
+            "LIBVA_DRIVERS_PATH=${pkgs.intel-media-driver}/lib/dri:${pkgs.intel-vaapi-driver}/lib/dri"
+            "LIBVA_DRIVER_NAME=iHD"
           ];
           Volumes = {"/data" = {};};
         };

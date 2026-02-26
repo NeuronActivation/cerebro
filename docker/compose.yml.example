@@ -13,4 +13,3 @@ services:
       - ./cerebro_data:/data
 
     restart: unless-stopped
-
